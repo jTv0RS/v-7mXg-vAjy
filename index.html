@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>monitoring</title>
+<script>
+/* Данные карты берутся из data.json (его обновляет пульт). Если файл зашифрован паролем — страница спросит пароль,
+   расшифровка идёт в браузере; на сервере данных в открытом виде нет. */
+var __URL = "https://raw.githubusercontent.com/jTv0RS/v%7mXg(+{?vAjy/data/data.json", __STALE = 25 * 60 * 1000, __SNAP = null, __ENC = false;
+function __store(k, v) { try { if (v === null) { localStorage.removeItem(k); sessionStorage.removeItem(k); } else sessionStorage.setItem(k, v); } catch (e) {} }
+function __get(k) { try { return sessionStorage.getItem(k) || localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function __fetchSnap() {
+  try {
+    var x = new XMLHttpRequest();
+    x.open('GET', __URL + (__URL.indexOf('?') < 0 ? '?' : '&') + 't=' + Math.floor(Date.now() / 60000), false);
+    x.send(null);
+    if (x.status === 200) return JSON.parse(x.responseText);
+  } catch (e) {}
+  return null;
+}
+function __fetchAsync() {
+  return fetch(__URL + (__URL.indexOf('?') < 0 ? '?' : '&') + 't=' + Math.floor(Date.now() / 60000), {cache: 'no-store'}).then(function (r) { return r.json(); });
+}
+function __b64(s) { var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+async function __decrypt(o, pw) {
+  var km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  var key = await crypto.subtle.deriveKey({name: 'PBKDF2', salt: __b64(o.salt), iterations: o.iter, hash: 'SHA-256'}, km, {name: 'AES-GCM', length: 256}, false, ['decrypt']);
+  var pt = await crypto.subtle.decrypt({name: 'AES-GCM', iv: __b64(o.iv)}, key, __b64(o.ct));
+  return new TextDecoder().decode(pt);
+}
+function __parseTime(s) {
+  var m = /(\d\d)\.(\d\d)\.(\d{4}) (\d\d):(\d\d)/.exec(s || '');
+  return m ? new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime() : 0;
+}
+function __sel() {
+  var q = /[?&]date=([\d.]+)/.exec(location.search);
+  var d = q ? q[1] : '';
+  return (__SNAP && __SNAP.days && __SNAP.days[d]) ? d : ((__SNAP && __SNAP.order && __SNAP.order[0]) || '');
+}
+function __initData() {
+  var o = __fetchSnap();
+  if (o && o.ct) {
+    __ENC = true;
+    var c = __get('gti_snap');
+    try { __SNAP = c ? JSON.parse(c) : null; } catch (e) { __SNAP = null; }
+  } else __SNAP = o;
+  var d = __sel();
+  return {rooms: (__SNAP && __SNAP.days && __SNAP.days[d]) ? __SNAP.days[d].rooms : []};
+}
+</script>
+<script>
+/* ПЕРВЫЙ скрипт: любая ошибка -> красная полоса сверху */
+(function () {
+  function bar(text) {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#c00;color:#fff;font:13px monospace;padding:6px 10px;white-space:pre-wrap';
+    d.textContent = text;
+    (document.body || document.documentElement).appendChild(d);
+  }
+  window.onerror = function (msg, src, line, col) {
+    bar('ОШИБКА: ' + msg + '  (строка ' + line + ':' + col + ')');
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function (e) {
+    bar('ОШИБКА (promise): ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+})();
+
+function loadDate(filename) {
+  // Перезагрузка страницы с другим отчётом
+  window.location.search = '?date=' + filename;
+}
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: #0e1116; color: #cfd6e2; font-family: monospace; }
+  #hud { box-sizing: border-box; width: 1340px; margin: 0 auto; padding: 8px 0; display: flex; gap: 10px; align-items: stretch; background: #0e1116; }
+  .box { background: #232a36; border: 2px solid #000; box-shadow: inset 2px 2px 0 #3a4558, inset -2px -2px 0 #141922; padding: 6px 10px; font: 12px monospace; color: #dfe6f0; display: flex; align-items: center; gap: 8px; }
+  .box.title { font-weight: bold; font-size: 14px; letter-spacing: 1px; color: #ffffff; }
+  .box label { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+  .box input { accent-color: #4caf50; width: 14px; height: 14px; margin: 0; }
+  .legend { flex: 1; gap: 14px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .sq { display: inline-block; width: 11px; height: 11px; border: 1px solid #000; }
+  canvas { display: block; margin: 0 auto; width: 1340px; height: 640px; image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="box title">MONITORING</div>
+  <div class="box"><label><input type="checkbox" id="only"> только рабочие партии</label></div>
+  <div class="box"><select id="dateSelect" onchange="loadDate(this.value)"></select></div><div class="box legend">
+    <span><i class="sq" style="background:#4caf50"></i>рапорт + сводка 7:00</span>
+    <span><i class="sq" style="background:#e0a63c"></i>только суточный</span>
+    <span><i class="sq" style="background:#666666"></i>нет данных</span>
+  </div>
+</div>
+<canvas id="c" width="1340" height="640"></canvas>
+
+<script>
+/* ================== ДАННЫЕ (заглушка; позже заменяется реальным JSON) ================== */
+var DATA = __initData();
+function addRoom(key, title) {
+  var r = { key: key, title: title, parties: [] };
+  DATA.rooms.push(r);
+  return r;
+}
+function addP(room, tag, status, names) {
+  room.parties.push({ tag: tag, status: status, names: names });
+}
+function buildStub() {
+  DATA.rooms.length = 0;
+  var a = addRoom('ritek', 'РИТЭК');
+  addP(a, '01', 'green',  ['Иванов', 'Петров', 'Сидоров']);
+  addP(a, '02', 'yellow', ['Кузнецов', 'Смирнов']);
+  addP(a, '03', 'gray',   ['Попов', 'Волков']);
+  addP(a, '04', 'green',  ['Соколов', 'Лебедев']);
+  addP(a, '05', 'yellow', ['Козлов', 'Новиков', 'Орлов']);
+  addP(a, '06', 'green',  ['Фёдоров', 'Орлов']);
+  addP(a, '07', 'gray',   ['Егоров', 'Павлов', 'Зайцев']);
+
+  var b = addRoom('rosneft', 'Роснефть');
+  addP(b, '11', 'green',  ['Морозов', 'Белов']);
+  addP(b, '12', 'green',  ['Гусев', 'Титов', 'Попов']);
+  addP(b, '13', 'yellow', ['Комаров', 'Ильин']);
+  addP(b, '14', 'gray',   ['Киселёв', 'Макаров']);
+  addP(b, '15', 'green',  ['Андреев', 'Фомин']);
+  addP(b, '16', 'yellow', ['Борисов', 'Яковлев', 'Ким']);
+  addP(b, '17', 'gray',   ['Сорокин', 'Вдовин']);
+  addP(b, '18', 'green',  ['Зуев', 'Лукин']);
+
+  var c = addRoom('lukoil_perm', 'ЛУКОЙЛ-Пермь');
+  addP(c, '21', 'green',  ['Мельник', 'Шаров', 'Рогов']);
+  addP(c, '22', 'green',  ['Тарасов', 'Беляев']);
+  addP(c, '23', 'yellow', ['Дроздов', 'Власов']);
+  addP(c, '24', 'gray',   ['Щукин', 'Блинов', 'Ефимов']);
+  addP(c, '25', 'yellow', ['Исаев', 'Жуков']);
+  addP(c, '26', 'green',  ['Крылов', 'Носов']);
+}
+
+/* ================== БАЗА ================== */
+var W = 1340, H = 640;
+var Z = 0.9, K = 0.86;        /* масштаб и сжатие глубины */
+var U = 1376, V = 576, GAP = 40;        /* размеры пола в «единицах мира» */
+var WALL = 100;               /* высота задних стен */
+var OX = 40, OY = 104;         /* смещение на экране */
+var cv, g, bg, bgCtx, ONLY = false;
+var FF = 'Verdana, "DejaVu Sans", Geneva, sans-serif';
+var PU = 140, PV = 170, V0 = 40, COLS = 3, U0 = 20, ZSTEP = 450;   /* шаг колонок/рядов */
+var ZONES = ['ritek', 'rosneft', 'lukoil_perm'];
+
+var STATUS_LED = { green: '#4caf50', yellow: '#e0a63c', gray: '#666666' };
+var STATUS_BG  = { green: '#2a7a2a', yellow: '#b06f00', gray: '#4a4f57' };
+var HAIR  = ['#2a2118', '#5b3a22', '#c9a24a', '#9c3d1e', '#aab0b8'];
+var SHIRT = ['#c0392b', '#2e86c1', '#27ae60', '#8e44ad', '#e67e22', '#16a085', '#d4ac0d', '#7f8c8d'];
+var BOOKS = ['#c0392b', '#2e86c1', '#27ae60', '#f1c40f', '#8e44ad', '#e67e22', '#ecf0f1', '#16a085'];
+
+/* ================== ПРИМИТИВЫ ================== */
+function hs(a, b) {
+  var h = (a * 374761393 + b * 668265263) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177 | 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function strh(s) {
+  var h = 7;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+var MC = {};
+function mix(c, a) {
+  var k = c + '|' + a;
+  if (MC[k]) return MC[k];
+  var r = parseInt(c.substr(1, 2), 16), gg = parseInt(c.substr(3, 2), 16), b = parseInt(c.substr(5, 2), 16);
+  var t = a < 0 ? 0 : 255, p = Math.abs(a);
+  r = Math.round(r + (t - r) * p); gg = Math.round(gg + (t - gg) * p); b = Math.round(b + (t - b) * p);
+  MC[k] = 'rgb(' + r + ',' + gg + ',' + b + ')';
+  return MC[k];
+}
+/* косая проекция: u вправо, v вниз (сжата), z вверх со сдвигом влево */
+function P(u, v, z) {
+  return [Math.round(OX + u * Z - z * Z * 0.28), Math.round(OY + v * Z * K - z * Z)];
+}
+function rect(x, y, w, h, c) {
+  if (w <= 0 || h <= 0) return;
+  g.fillStyle = c;
+  g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+}
+/* пиксель-точная заливка выпуклого многоугольника построчно */
+function polyFill(pts, c) {
+  g.fillStyle = c;
+  var n = pts.length, y0 = 1e9, y1 = -1e9, i, y, yy, xmin, xmax, a, b, x;
+  for (i = 0; i < n; i++) { if (pts[i][1] < y0) y0 = pts[i][1]; if (pts[i][1] > y1) y1 = pts[i][1]; }
+  for (y = y0; y < y1; y++) {
+    yy = y + 0.5; xmin = 1e9; xmax = -1e9;
+    for (i = 0; i < n; i++) {
+      a = pts[i]; b = pts[(i + 1) % n];
+      if ((a[1] <= yy && b[1] > yy) || (b[1] <= yy && a[1] > yy)) {
+        x = a[0] + (yy - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
+        if (x < xmin) xmin = x;
+        if (x > xmax) xmax = x;
+      }
+    }
+    if (xmax >= xmin) {
+      var xa = Math.round(xmin), xb = Math.round(xmax);
+      g.fillRect(xa, y, Math.max(1, xb - xa), 1);
+    }
+  }
+}
+/* линия Брезенхэма со слиянием горизонтальных отрезков */
+function lineP(a, b, c) {
+  g.fillStyle = c;
+  var x0 = a[0], y0 = a[1], x1 = b[0], y1 = b[1];
+  if (x0 === x1) { g.fillRect(x0, Math.min(y0, y1), 1, Math.abs(y1 - y0) + 1); return; }
+  var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+  var sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy, n = 0;
+  var rs = x0, ry = y0, rl = 0;
+  for (;;) {
+    if (y0 !== ry) { g.fillRect(Math.min(rs, rs + rl * sx - sx * 0 ), ry, 1, 1); }
+    break;
+  }
+  /* простой и надёжный вариант: пиксель за пикселем, горизонтальные серии сливаются */
+  x0 = a[0]; y0 = a[1]; e = dx + dy; rs = x0; ry = y0; rl = 1;
+  for (;;) {
+    if (x0 === x1 && y0 === y1) break;
+    if (n++ > 4000) break;
+    var e2 = 2 * e, nx = x0, ny = y0;
+    if (e2 >= dy) { e += dy; nx += sx; }
+    if (e2 <= dx) { e += dx; ny += sy; }
+    if (ny === ry) { rl++; }
+    else { g.fillRect(Math.min(rs, rs + (rl - 1) * sx), ry, rl, 1); rs = nx; ry = ny; rl = 1; }
+    x0 = nx; y0 = ny;
+  }
+  g.fillRect(Math.min(rs, rs + (rl - 1) * sx), ry, rl, 1);
+}
+function outline(pts, c, closed) {
+  var n = pts.length;
+  for (var i = 0; i < (closed ? n : n - 1); i++) lineP(pts[i], pts[(i + 1) % n], c);
+}
+/* параллелепипед: верх, левая (v-)грань, правая (u-)грань, контур */
+function isoBox(u, v, w, d, h, z0, base, edge) {
+  var z1 = z0 + h, e = edge || '#14171c';
+  var A = P(u, v + d, z0), B = P(u + w, v + d, z0), Cc = P(u + w, v, z0);
+  var A2 = P(u, v + d, z1), B2 = P(u + w, v + d, z1), C2 = P(u + w, v, z1), D2 = P(u, v, z1);
+  polyFill([A, B, B2, A2], mix(base, -0.2));
+  polyFill([B, Cc, C2, B2], mix(base, -0.38));
+  polyFill([D2, C2, B2, A2], base);
+  outline([D2, C2, B2, A2], e, true);
+  lineP(A, A2, e); lineP(B, B2, e); lineP(Cc, C2, e);
+  lineP(A, B, e); lineP(B, Cc, e);
+  lineP(A2, B2, mix(base, 0.35));
+}
+function shadowQuad(u, v, w, d, a) {
+  polyFill([P(u, v, 0), P(u + w, v, 0), P(u + w, v + d, 0), P(u, v + d, 0)], 'rgba(0,0,0,' + (a || 0.2) + ')');
+}
+function qV(u0, u1, z0, z1, v) { return [P(u0, v, z0), P(u1, v, z0), P(u1, v, z1), P(u0, v, z1)]; }
+function qU(v0, v1, z0, z1, u) { return [P(u, v0, z0), P(u, v1, z0), P(u, v1, z1), P(u, v0, z1)]; }
+
+var MEAS = {};
+function measure(txt, font) {
+  var k = font + '|' + txt;
+  if (MEAS[k] === undefined) { g.font = font; MEAS[k] = g.measureText(txt).width; }
+  return MEAS[k];
+}
+function fitLine(txt, bold, sizes, maxw) {
+  var i, f;
+  for (i = 0; i < sizes.length; i++) {
+    f = (bold ? 'bold ' : '') + sizes[i] + 'px ' + FF;
+    if (measure(txt, f) <= maxw) return { t: txt, font: f, w: measure(txt, f) };
+  }
+  f = (bold ? 'bold ' : '') + sizes[sizes.length - 1] + 'px ' + FF;
+  while (txt.length > 1 && measure(txt + '…', f) > maxw) txt = txt.slice(0, -1);
+  return { t: txt + '…', font: f, w: measure(txt + '…', f) };
+}
+function flatBox(x, y, w, h, fill, light, shade, line) {
+  rect(x, y, w, h, line || '#14171c');
+  rect(x + 1, y + 1, w - 2, h - 2, fill);
+  if (light) { rect(x + 1, y + 1, w - 2, 1, light); rect(x + 1, y + 1, 1, h - 2, light); }
+  if (shade) { rect(x + 1, y + h - 2, w - 2, 1, shade); rect(x + w - 2, y + 1, 1, h - 2, shade); }
+}
+
+/* ================== СТАТИКА: пол, стены, окна, шкафы ================== */
+function brickV(u0, u1, z0, z1, v) {
+  var tones = ['#8b4a3b', '#9a5442', '#7d4033'], c, ju, z, q;
+  for (c = 0, z = z0; z < z1; c++, z += 6) {
+    for (ju = u0 + ((c % 2) ? -8 : 0); ju < u1; ju += 16) {
+      var a = Math.max(ju, u0), b = Math.min(ju + 16, u1);
+      if (b <= a) continue;
+      polyFill(qV(a, b, z, Math.min(z + 6, z1), v), tones[(hs((ju / 16) | 0, c) * 3) | 0]);
+    }
+  }
+  for (c = 0, z = z0; z < z1; c++, z += 6) {
+    lineP(P(u0, v, z), P(u1, v, z), '#5d3226');
+    for (ju = u0 + ((c % 2) ? 8 : 0); ju < u1; ju += 16) lineP(P(ju, v, z), P(ju, v, Math.min(z + 6, z1)), '#5d3226');
+  }
+}
+function brickU(v0, v1, z0, z1, u) {
+  var tones = ['#8b4a3b', '#9a5442', '#7d4033'], c, jv, z;
+  for (c = 0, z = z0; z < z1; c++, z += 6) {
+    for (jv = v0 + ((c % 2) ? -8 : 0); jv < v1; jv += 16) {
+      var a = Math.max(jv, v0), b = Math.min(jv + 16, v1);
+      if (b <= a) continue;
+      polyFill(qU(a, b, z, Math.min(z + 6, z1), u), mix(tones[(hs((jv / 16) | 0, c + 9) * 3) | 0], -0.18));
+    }
+  }
+  for (c = 0, z = z0; z < z1; c++, z += 6) {
+    lineP(P(u, v0, z), P(u, v1, z), '#4d281d');
+    for (jv = v0 + ((c % 2) ? 8 : 0); jv < v1; jv += 16) lineP(P(u, jv, z), P(u, jv, Math.min(z + 6, z1)), '#4d281d');
+  }
+}
+function windowV(u0, u1, z0, z1) {
+  polyFill(qV(u0 - 3, u1 + 3, z0 - 3, z1 + 3, 0), '#cdbfa8');
+  polyFill(qV(u0, u1, z0, z1, 0), '#8fd3f5');
+  polyFill(qV(u0, u1, z0, (z0 + z1) / 2, 0), '#b9e6fa');
+  var um = (u0 + u1) / 2, zm = (z0 + z1) / 2;
+  lineP(P(um, 0, z0), P(um, 0, z1), '#cdbfa8');
+  lineP(P(u0, 0, zm), P(u1, 0, zm), '#cdbfa8');
+  lineP(P(u0 + 6, 0, z0 + 3), P(u0 + 20, 0, z1 - 3), 'rgba(255,255,255,0.55)');
+  outline(qV(u0 - 3, u1 + 3, z0 - 3, z1 + 3, 0), '#14171c', true);
+}
+function windowU(v0, v1, z0, z1) {
+  polyFill(qU(v0 - 3, v1 + 3, z0 - 3, z1 + 3, 0), '#a89a84');
+  polyFill(qU(v0, v1, z0, z1, 0), '#6fb0d6');
+  polyFill(qU(v0, v1, z0, (z0 + z1) / 2, 0), '#8cc6e4');
+  var vm = (v0 + v1) / 2, zm = (z0 + z1) / 2;
+  lineP(P(0, vm, z0), P(0, vm, z1), '#a89a84');
+  lineP(P(0, v0, zm), P(0, v1, zm), '#a89a84');
+  lineP(P(0, v0 + 6, z0 + 3), P(0, v0 + 20, z1 - 3), 'rgba(255,255,255,0.4)');
+  outline(qU(v0 - 3, v1 + 3, z0 - 3, z1 + 3, 0), '#14171c', true);
+}
+function cabinet(u, v, w, d, h, seed) {
+  isoBox(u, v, w, d, h, 0, '#8a6238', '#3a2512');
+  var vf = v + d, rows = 2, rh = (h - 8) / rows, r, bx, bw, bh, z, col;
+  polyFill(qV(u + 3, u + w - 3, 4, h - 3, vf), '#2a1c10');
+  for (r = 0; r < rows; r++) {
+    z = 4 + r * rh + 1;
+    for (bx = u + 4; bx < u + w - 6; bx += bw) {
+      bw = 2 + ((hs(bx, r + seed) * 2) | 0);
+      bh = Math.max(4, rh - 3 - ((hs(bx + 7, r + seed) * 3) | 0));
+      col = BOOKS[(hs(bx * 3, r + seed * 5) * 8) | 0];
+      polyFill(qV(bx, bx + bw, z, z + bh, vf), col);
+    }
+    lineP(P(u + 3, vf, z - 1), P(u + w - 3, vf, z - 1), '#6a4524');
+  }
+}
+function cooler(u, v) {
+  isoBox(u, v, 14, 14, 16, 0, '#dfe6ec', '#14171c');
+  isoBox(u + 2, v + 2, 10, 10, 14, 16, '#8fd3f5', '#1f4a66');
+  polyFill(qV(u + 3, u + 5, 18, 28, v + 12), 'rgba(255,255,255,0.6)');
+}
+
+
+/* ===== растения, окна, стеллажи ===== */
+function discS(cx, cy, r, c) {
+  g.fillStyle = c;
+  cx = Math.round(cx); cy = Math.round(cy);
+  for (var dy = -r; dy <= r; dy++) {
+    var h = Math.round(Math.sqrt(r * r - dy * dy));
+    g.fillRect(cx - h, cy + dy, h * 2, 1);
+  }
+}
+function blob(cx, cy, r, mid, light, dark) {
+  discS(cx, cy, r + 1, dark || '#1d4a2a');
+  discS(cx, cy, r, mid || '#3e8e4f');
+  discS(cx - r * 0.3, cy - r * 0.35, Math.max(1, Math.round(r * 0.5)), light || '#57a863');
+}
+/* маленькое растение на полке/подоконнике: kind 0 куст, 1 трава, 2 цветы, 3 кактус */
+function miniPlant(u, v, z, kind) {
+  var b = P(u, v, z), i;
+  isoBox(u - 4, v - 4, 8, 8, 6, z, kind === 2 ? '#c9a24a' : '#a4552f', '#3a1d0e');
+  var c = P(u, v, z + 6);
+  if (kind === 0) {
+    blob(c[0], c[1] - 5, 5); blob(c[0] - 4, c[1] - 3, 3); blob(c[0] + 4, c[1] - 3, 3);
+  } else if (kind === 1) {
+    for (i = -3; i <= 3; i++) lineP([c[0] + i, c[1]], [c[0] + i * 2, c[1] - 9 + Math.abs(i)], i % 2 ? '#3e8e4f' : '#57a863');
+  } else if (kind === 2) {
+    blob(c[0], c[1] - 4, 4);
+    rect(c[0] - 3, c[1] - 8, 2, 2, '#e24b5a'); rect(c[0] + 2, c[1] - 7, 2, 2, '#f1c40f'); rect(c[0], c[1] - 10, 2, 2, '#ffffff');
+  } else {
+    rect(c[0] - 2, c[1] - 11, 5, 11, '#14171c'); rect(c[0] - 1, c[1] - 10, 3, 10, '#4e9a5c'); rect(c[0] - 1, c[1] - 10, 1, 10, '#6bb878');
+    rect(c[0] - 5, c[1] - 8, 3, 2, '#14171c'); rect(c[0] - 4, c[1] - 7, 2, 4, '#4e9a5c');
+    rect(c[0] + 3, c[1] - 6, 3, 2, '#14171c'); rect(c[0] + 3, c[1] - 5, 2, 3, '#4e9a5c');
+    rect(c[0], c[1] - 12, 1, 1, '#e24b5a');
+  }
+}
+/* большое дерево в горшке (динамическое, качается) */
+function tree(u, v, t, seed) {
+  var sw = Math.sin(t * 1.4 + seed) * 1.6;
+  rect(P(u, v, 0)[0] - 9, P(u, v, 0)[1] - 2, 20, 6, 'rgba(0,0,0,0.25)');
+  isoBox(u - 7, v - 7, 14, 14, 11, 0, '#a4552f', '#3a1d0e');
+  var soil = [P(u - 6, v - 6, 11), P(u + 6, v - 6, 11), P(u + 6, v + 6, 11), P(u - 6, v + 6, 11)];
+  polyFill(soil, '#3a2412');
+  isoBox(u - 2, v - 2, 4, 4, 28, 11, '#6b4a2a', '#2a1a0c');
+  var c = P(u, v, 52), i, bl = [[0, 0, 14], [-12, 7, 10], [12, 6, 10], [0, -12, 10], [-7, -6, 9], [8, -7, 9], [-14, -4, 7], [14, -3, 7]];
+  for (i = 0; i < bl.length; i++) blob(c[0] + bl[i][0] + sw * (1 - bl[i][1] / 30), c[1] + bl[i][1], bl[i][2]);
+  blob(c[0] - 4 + sw, c[1] - 14, 5, '#6bb878', '#8ed19a', '#3e8e4f');
+}
+/* панорамное окно в пол: стекло, небо, город, рама, импосты, подоконник-полка */
+function panoWindow(u0, w, seed) {
+  var z0 = 6, z1 = WALL - 14, i, k, zz, bx, bw, bh;
+  var fr = '#2b2f36', frl = '#4a505c';
+  /* внешняя рама */
+  polyFill(qV(u0 - 5, u0 + w + 5, 0, z1 + 5, 0), fr);
+  /* небо полосами */
+  var sky = ['#a9dcf6', '#9fd6f3', '#95d0f0', '#8ac9ec', '#80c2e8', '#9dd2ee', '#b9e2f5'];
+  for (zz = z0, k = 0; zz < z1; zz += 6, k++) {
+    var q = Math.min(sky.length - 1, Math.floor((1 - (zz - z0) / (z1 - z0)) * (sky.length - 1) + 0.2));
+    polyFill(qV(u0, u0 + w, zz, Math.min(zz + 6, z1), 0), sky[q]);
+  }
+  /* облака */
+  var cl = [[0.12, 0.74, 34, 5], [0.55, 0.62, 44, 6], [0.78, 0.82, 26, 4]];
+  for (i = 0; i < cl.length; i++) {
+    var cu = u0 + cl[i][0] * w + hs(seed, i) * 10, cz = z0 + cl[i][1] * (z1 - z0);
+    polyFill(qV(cu, cu + cl[i][2], cz, cz + cl[i][3], 0), 'rgba(255,255,255,0.85)');
+    polyFill(qV(cu + 6, cu + cl[i][2] - 8, cz + cl[i][3], cz + cl[i][3] + 4, 0), 'rgba(255,255,255,0.85)');
+  }
+  /* силуэт города */
+  for (bx = u0, k = 0; bx < u0 + w; bx += bw, k++) {
+    bw = 14 + ((hs(seed + k, 3) * 14) | 0);
+    bw = Math.min(bw, u0 + w - bx);
+    bh = 12 + ((hs(seed + k, 5) * 34) | 0);
+    var col = (k % 2) ? '#6f8aa6' : '#5a738f';
+    polyFill(qV(bx, bx + bw, z0, z0 + bh, 0), col);
+    for (zz = z0 + 4; zz < z0 + bh - 3; zz += 5)
+      for (var wu = bx + 3; wu < bx + bw - 3; wu += 5)
+        if (hs(wu + seed, zz) > 0.55) polyFill(qV(wu, wu + 2, zz, zz + 2, 0), '#d6ecfa');
+  }
+  /* блики */
+  lineP(P(u0 + 14, 0, z1 - 6), P(u0 + 44, 0, z0 + 8), 'rgba(255,255,255,0.45)');
+  lineP(P(u0 + 22, 0, z1 - 6), P(u0 + 52, 0, z0 + 8), 'rgba(255,255,255,0.28)');
+  /* импосты */
+  var um = u0 + w / 2, zm = z0 + (z1 - z0) * 0.62;
+  polyFill(qV(um - 2, um + 2, z0, z1, 0), fr);
+  polyFill(qV(u0, u0 + w, zm - 2, zm + 1, 0), fr);
+  lineP(P(um - 2, 0, z0), P(um - 2, 0, z1), frl);
+  lineP(P(u0, 0, zm + 1), P(u0 + w, 0, zm + 1), frl);
+  /* контур и верхний наличник */
+  outline(qV(u0 - 5, u0 + w + 5, 0, z1 + 5, 0), '#14171c', true);
+  outline(qV(u0, u0 + w, z0, z1, 0), '#14171c', true);
+  polyFill(qV(u0 - 9, u0 + w + 9, z1 + 5, z1 + 9, 0), '#cdbfa8');
+  outline(qV(u0 - 9, u0 + w + 9, z1 + 5, z1 + 9, 0), '#14171c', true);
+  /* подоконник-полка */
+  isoBox(u0 - 8, 0, w + 16, 12, 6, 0, '#d8c9a8', '#14171c');
+  isoBox(u0 - 8, 8, w + 16, 4, 6, 0, '#cdbd98', '#14171c');
+  /* цветы на подоконнике */
+  miniPlant(u0 + 20, 5, 6, (seed + 0) % 3);
+  miniPlant(u0 + w - 26, 5, 6, (seed + 1) % 4);
+  if (w > 140) miniPlant(u0 + w / 2 - 22, 5, 6, (seed + 2) % 3);
+}
+/* стеллаж у задней стены (лицо вдоль u) */
+function stellazh(u, v, w, d, h, seed) {
+  var n = 4, lh = (h - 6) / n, i, r, bx, bw, bh, col, z, vf = v + d;
+  isoBox(u, v, w, d, h, 0, '#7a5230', '#2e1c0e');
+  polyFill(qV(u + 3, u + w - 3, 4, h - 3, vf), '#2a1c10');
+  for (r = 0; r < n; r++) {
+    z = 4 + r * lh + 2;
+    for (bx = u + 4; bx < u + w - 6; bx += bw) {
+      var roll = hs(bx * 3 + seed, r + seed * 7);
+      if (roll > 0.9) {
+        bw = 8; var cc = P(bx + 4, vf, z);
+        isoBox(bx + 1, vf - 5, 6, 5, 4, z, '#c9a24a', '#3a2f10');
+        blob(cc[0], cc[1] - 8, 3);
+        continue;
+      }
+      if (roll < 0.12) {
+        bw = 10; bh = lh - 6;
+        polyFill(qV(bx, bx + bw, z, z + bh, vf), BOOKS[(hs(bx, r + seed) * 8) | 0]);
+        polyFill(qV(bx + 2, bx + bw - 2, z + 3, z + bh - 3, vf), 'rgba(255,255,255,0.35)');
+        continue;
+      }
+      bw = 2 + ((hs(bx + 7, r + seed) * 2) | 0);
+      bh = Math.max(5, lh - 5 - ((hs(bx + 3, r + seed * 3) * 5) | 0));
+      col = BOOKS[(hs(bx * 3, r + seed * 5) * 8) | 0];
+      polyFill(qV(bx, bx + bw, z, z + bh, vf), col);
+      lineP(P(bx, vf, z + bh), P(bx + bw, vf, z + bh), mix(col, 0.4));
+    }
+    lineP(P(u + 3, vf, z - 2), P(u + w - 3, vf, z - 2), '#a97c4a');
+  }
+  var ct = P(u + w / 2, v + d / 2, h);
+  isoBox(u + w / 2 - 5, v + d / 2 - 5, 10, 10, 6, h, '#a4552f', '#3a1d0e');
+  blob(ct[0], ct[1] - 14, 7); blob(ct[0] - 7, ct[1] - 10, 5); blob(ct[0] + 7, ct[1] - 10, 5);
+}
+/* стеллаж у левой стены (лицо вдоль v) */
+function stellazhU(v, dv, h, seed) {
+  var w = 18, n = 4, lh = (h - 6) / n, r, jv, bh, bw, col, z, uf = w;
+  isoBox(0, v, w, dv, h, 0, '#7a5230', '#2e1c0e');
+  polyFill(qU(v + 3, v + dv - 3, 4, h - 3, uf), '#2a1c10');
+  for (r = 0; r < n; r++) {
+    z = 4 + r * lh + 2;
+    for (jv = v + 4; jv < v + dv - 6; jv += bw) {
+      var roll = hs(jv * 3 + seed, r + seed * 7);
+      if (roll > 0.92) {
+        bw = 8; var cc = P(uf - 4, jv + 4, z);
+        isoBox(uf - 8, jv + 1, 6, 6, 4, z, '#c9a24a', '#3a2f10');
+        blob(cc[0], cc[1] - 8, 3);
+        continue;
+      }
+      bw = 2 + ((hs(jv + 7, r + seed) * 2) | 0);
+      bh = Math.max(5, lh - 5 - ((hs(jv + 3, r + seed * 3) * 5) | 0));
+      col = BOOKS[(hs(jv * 3, r + seed * 5) * 8) | 0];
+      polyFill(qU(jv, jv + bw, z, z + bh, uf), col);
+    }
+    lineP(P(uf, v + 3, z - 2), P(uf, v + dv - 3, z - 2), '#a97c4a');
+  }
+  var ct = P(w / 2, v + dv / 2, h);
+  isoBox(w / 2 - 5, v + dv / 2 - 5, 10, 10, 6, h, '#a4552f', '#3a1d0e');
+  blob(ct[0], ct[1] - 14, 7); blob(ct[0] - 7, ct[1] - 10, 5); blob(ct[0] + 7, ct[1] - 10, 5);
+}
+var PIERS = [[10, 44], [413, 84], [863, 84], [1300, 56]];
+var WINS = [[55, 150], [255, 150], [505, 150], [705, 150], [955, 150], [1155, 140]];
+var TREES = [];
+var ZPOS = [[0, 0], [1, 0], [2, 0]];   /* колонка, ряд зон: РИТЭК, Роснефть вверху; ЛУКОЙЛ внизу слева */
+
+
+/* ===== стойки с работающим оборудованием (динамические) ===== */
+var CABLE = ['#e24b5a', '#4aa3e8', '#f1c40f', '#57e07f', '#c78bf0'];
+function ledA(u, z, vf, col, t, seed, rate) {
+  var on = hs(Math.floor(t * rate) + seed * 13, (u * 7) | 0) > 0.35;
+  polyFill(qV(u, u + 2, z, z + 2, vf), on ? col : mix(col, -0.72));
+}
+function rackAt(u, w, seed, t) {
+  var v = 4, d = 24, h = 92, vf = v + d, n = 8, uh = (h - 8) / n, i, k, z, type, bx, cx, cy, a, ang;
+  var types = ['server', 'switch', 'server', 'fan', 'patch', 'server', 'ups', 'lcd'];
+  var ux0 = u + 7, ux1 = u + w - 7;
+  shadowRack(u, v, w, d);
+  isoBox(u, v, w, d, h, 0, '#2e333c', '#14171c');
+  polyFill(qV(u + 3, u + w - 3, 3, h - 3, vf), '#15181d');
+  for (i = 0; i < n; i++) {
+    z = 4 + i * uh; type = types[(i + seed) % n];
+    polyFill(qV(u + 4, u + w - 4, z, z + uh - 1.5, vf), '#3b414d');
+    lineP(P(u + 4, vf, z + uh - 1.5), P(u + w - 4, vf, z + uh - 1.5), '#5a6272');
+    lineP(P(u + 4, vf, z), P(u + w - 4, vf, z), '#23272f');
+    if (type === 'server') {
+      for (bx = ux0; bx + 5 <= ux1 - 9; bx += 7) {
+        polyFill(qV(bx, bx + 5, z + 1.5, z + uh - 3.5, vf), '#14171c');
+        lineP(P(bx, vf, z + uh - 3.5), P(bx + 5, vf, z + uh - 3.5), '#2a2f38');
+      }
+      ledA(ux1 - 7, z + 3.2, vf, '#4caf50', t, seed + i, 1.2);
+      ledA(ux1 - 3.5, z + 3.2, vf, '#e0a63c', t, seed + i + 5, 3.5);
+    } else if (type === 'switch') {
+      for (k = 0, bx = ux0; bx + 3 <= ux1; bx += 4.4, k++) {
+        polyFill(qV(bx, bx + 3, z + 1.5, z + 4.2, vf), '#0c0e12');
+        ledA(bx + 0.4, z + 5, vf, k % 5 === 0 ? '#e0a63c' : '#57e07f', t, seed + i + k, 4);
+      }
+    } else if (type === 'fan') {
+      for (k = 0; k < 2; k++) {
+        cx = P(ux0 + (ux1 - ux0) * (k ? 0.72 : 0.28), vf, z + uh / 2 - 0.8);
+        discS(cx[0], cx[1], 4, '#0c0e12');
+        ang = t * (9 + k * 2) + seed;
+        lineP([cx[0], cx[1]], [cx[0] + Math.round(Math.cos(ang) * 3), cx[1] + Math.round(Math.sin(ang) * 3)], '#aeb5bd');
+        lineP([cx[0], cx[1]], [cx[0] - Math.round(Math.cos(ang) * 3), cx[1] - Math.round(Math.sin(ang) * 3)], '#aeb5bd');
+        lineP([cx[0], cx[1]], [cx[0] + Math.round(Math.sin(ang) * 3), cx[1] - Math.round(Math.cos(ang) * 3)], '#7a828c');
+        lineP([cx[0], cx[1]], [cx[0] - Math.round(Math.sin(ang) * 3), cx[1] + Math.round(Math.cos(ang) * 3)], '#7a828c');
+        rect(cx[0], cy = cx[1], 1, 1, '#ffffff');
+      }
+    } else if (type === 'patch') {
+      for (k = 0, bx = ux0; bx + 2.5 <= ux1; bx += 3.8, k++) {
+        polyFill(qV(bx, bx + 2.5, z + 4, z + 7, vf), '#0c0e12');
+        lineP(P(bx + 1.2, vf, z + 4), P(bx + 1.2 + ((k % 3) - 1) * 0.8, vf, z + 0.6), CABLE[(k + seed) % 5]);
+      }
+    } else if (type === 'ups') {
+      var lvl = 3 + Math.floor(2.5 * (1 + Math.sin(t * 0.8 + seed)));
+      for (k = 0; k < 6; k++) polyFill(qV(ux0 + k * 6, ux0 + k * 6 + 4.5, z + 2.5, z + 6, vf), k < lvl ? (k < 4 ? '#4caf50' : '#e0a63c') : '#1f242c');
+    } else {
+      polyFill(qV(ux0, ux1, z + 1.5, z + uh - 3, vf), '#0c2a1a');
+      for (k = 0, bx = ux0 + 1.5; bx + 2 <= ux1 - 1; bx += 3, k++) {
+        var bh = 1 + hs(k + Math.floor(t * 2.2) + seed, 5) * (uh - 7);
+        polyFill(qV(bx, bx + 2, z + 2, z + 2 + bh, vf), '#57e07f');
+      }
+    }
+  }
+  /* верхняя панель: вентрешётка и лампа состояния */
+  for (k = 0; k < 4; k++) lineP(P(u + 6 + k * 5, v + 6, h), P(u + 6 + k * 5, v + 16, h), '#14171c');
+  isoBox(u + w - 12, v + 4, 4, 4, 3, h, '#14171c');
+  polyFill([P(u + w - 11, v + 5, h + 3), P(u + w - 9, v + 5, h + 3), P(u + w - 9, v + 7, h + 3), P(u + w - 11, v + 7, h + 3)],
+    Math.sin(t * 2.4 + seed) > -0.2 ? '#57e07f' : '#1f5a30');
+}
+function shadowRack(u, v, w, d) { polyFill([P(u + 2, v + d, 0), P(u + w + 4, v + d, 0), P(u + w + 4, v + d + 6, 0), P(u + 2, v + d + 6, 0)], 'rgba(0,0,0,0.22)'); }
+function racks(t) {
+  for (var i = 0; i < PIERS.length; i++) rackAt(PIERS[i][0], PIERS[i][1], i * 3 + 1, t);
+}
+
+function buildStatic() {
+  bg = document.createElement('canvas');
+  bg.width = W; bg.height = H;
+  bgCtx = bg.getContext('2d');
+  var main = g; g = bgCtx;
+  var i, j;
+  rect(0, 0, W, H, '#0e1116');
+  /* толщина плиты пола */
+  polyFill([P(0, V, -9), P(U, V, -9), P(U, V, 0), P(0, V, 0)], '#3a3f49');
+  polyFill([P(U, V, -9), P(U, 0, -9), P(U, 0, 0), P(U, V, 0)], '#2a2e36');
+  outline([P(0, V, -9), P(U, V, -9), P(U, 0, -9)], '#14171c', false);
+  lineP(P(0, V, 0), P(0, V, -9), '#14171c'); lineP(P(U, V, 0), P(U, V, -9), '#14171c'); lineP(P(U, 0, 0), P(U, 0, -9), '#14171c');
+  /* плитка пола */
+  for (j = 0; j < V / 32; j++) {
+    for (i = 0; i < U / 32; i++) {
+      polyFill([P(i * 32, j * 32, 0), P(i * 32 + 32, j * 32, 0), P(i * 32 + 32, j * 32 + 32, 0), P(i * 32, j * 32 + 32, 0)],
+        hs(i, j) > 0.5 ? '#9aa5b1' : '#93a0ac');
+      if (hs(i + 50, j + 7) < 0.3) {
+        var sp = P(i * 32 + 4 + hs(i, j + 99) * 22, j * 32 + 4 + hs(i + 3, j) * 22, 0);
+        rect(sp[0], sp[1], 2, 1, '#b3bdc8');
+      }
+      if (hs(i + 21, j + 17) < 0.14) {
+        var sq = P(i * 32 + 4 + hs(i + 9, j + 5) * 22, j * 32 + 4 + hs(i, j + 2) * 22, 0);
+        rect(sq[0], sq[1], 2, 1, '#8693a0');
+      }
+    }
+  }
+  for (i = 0; i <= U / 32; i++) lineP(P(i * 32, 0, 0), P(i * 32, V, 0), '#87929e');
+  for (j = 0; j <= V / 32; j++) lineP(P(0, j * 32, 0), P(U, j * 32, 0), '#87929e');
+  /* контур пола спереди */
+  outline([P(0, V, 0), P(U, V, 0), P(U, 0, 0)], '#14171c', false);
+  /* тени от стен на полу */
+  polyFill([P(0, 0, 0), P(U, 0, 0), P(U, 12, 0), P(0, 12, 0)], 'rgba(0,0,0,0.22)');
+  polyFill([P(0, 0, 0), P(12, 0, 0), P(12, V, 0), P(0, V, 0)], 'rgba(0,0,0,0.16)');
+  /* задние стены */
+  isoBox(-6, -6, U + 6, 6, WALL, 0, '#8b4a3b');
+  isoBox(-6, 0, 6, V, WALL, 0, '#8b4a3b');
+  brickV(-6, U, 0, WALL, 0);
+  brickU(0, V, 0, WALL, 0);
+  outline(qV(-6, U, 0, WALL, 0), '#14171c', true);
+  outline(qU(0, V, 0, WALL, 0), '#14171c', true);
+  polyFill([P(-6, -6, WALL), P(U, -6, WALL), P(U, 0, WALL), P(-6, 0, WALL)], '#b0644f');
+  polyFill([P(-6, 0, WALL), P(0, 0, WALL), P(0, V, WALL), P(-6, V, WALL)], '#a05a48');
+  outline([P(-6, -6, WALL), P(U, -6, WALL), P(U, 0, WALL), P(-6, 0, WALL)], '#14171c', true);
+  outline([P(-6, 0, WALL), P(0, 0, WALL), P(0, V, WALL), P(-6, V, WALL)], '#14171c', true);
+  /* панорамные окна */
+  for (i = 0; i < WINS.length; i++) panoWindow(WINS[i][0], WINS[i][1], i * 3 + 1);
+  /* стеллажи вдоль левой стены + окна */
+  windowU(40, 170, 8, 84); windowU(200, 330, 8, 84);
+  cooler(1362, 6);
+  g = main;
+}
+
+/* ================== ОБЪЕКТЫ ================== */
+function monitor(uc, v0, on, t, seed) {
+  var u = uc - 12, v = v0 + 4;
+  isoBox(uc - 3, v + 0.5, 6, 2, 3, 22, '#1c1f24');
+  isoBox(u, v, 24, 3, 15, 24, '#2b2f36');
+  var vf = v + 3, i, f;
+  if (on) {
+    var flick = Math.sin(t * 3 + seed * 1.7) > 0.9;
+    polyFill(qV(u + 2, u + 22, 26, 37, vf), flick ? '#8fd2f0' : '#79c4e8');
+    f = Math.floor(t * 1.5 + seed);
+    lineP(P(u + 3, vf, 35.5), P(u + 3 + 6 + (f % 5) * 2, vf, 35.5), '#d6f1ff');
+    for (i = 0; i < 3; i++) {
+      var wd = 5 + ((f + i * 3 + seed) % 5) * 3;
+      lineP(P(u + 3 + (i === 1 ? 2 : 0), vf, 33.2 - i * 2.2), P(u + 3 + (i === 1 ? 2 : 0) + Math.min(wd, 15), vf, 33.2 - i * 2.2), '#2f6f96');
+    }
+  } else {
+    polyFill(qV(u + 2, u + 22, 26, 37, vf), '#2f3640');
+    lineP(P(u + 5, vf, 27), P(u + 13, vf, 36), '#4a5560');
+    lineP(P(u + 12, vf, 27), P(u + 20, vf, 36), '#4a5560');
+  }
+}
+function keyboard(uc, v0, t, active, seed) {
+  isoBox(uc - 9, v0 + 20, 18, 6, 1.5, 22, '#cfd4da');
+  var k, hot = active ? Math.floor(t * 8 + seed) % 14 : -1, p;
+  for (k = 0; k < 7; k++) {
+    p = P(uc - 7 + k * 2.4, v0 + 21.5, 23.5); rect(p[0], p[1], 1, 1, hot === k ? '#ffffff' : '#6f7780');
+    p = P(uc - 6 + k * 2.4, v0 + 23.5, 23.5); rect(p[0], p[1], 1, 1, hot === k + 7 ? '#ffffff' : '#6f7780');
+  }
+}
+function mug(u, v, c) {
+  isoBox(u, v, 4, 4, 4, 22, c || '#e8e8e8');
+  polyFill([P(u + 0.6, v + 0.6, 26), P(u + 3.4, v + 0.6, 26), P(u + 3.4, v + 3.4, 26), P(u + 0.6, v + 3.4, 26)], '#5a3a22');
+}
+function chairPart(uc, v0, occ) {
+  var base = occ ? '#3a6ea5' : '#3d4a5c';
+  isoBox(uc - 2, v0 + 44, 4, 4, 8, 0, '#2a2e36');
+  isoBox(uc - 14, v0 + 40, 3, 12, 3, 14, mix(base, -0.2));
+  isoBox(uc + 11, v0 + 40, 3, 12, 3, 14, mix(base, -0.2));
+  isoBox(uc - 10, v0 + 38, 20, 16, 3, 8, base);
+}
+function chairBack(uc, v0, occ) {
+  var base = occ ? '#3a6ea5' : '#3d4a5c';
+  isoBox(uc - 11, v0 + 54, 22, 3, 14, 11, mix(base, -0.12));
+}
+function person(uc, v0, seed, f) {
+  var hair = HAIR[seed % 5], shirt = SHIRT[(seed * 7 + 3) % 8], skin = '#e8b890';
+  var dl = f ? 0 : 1.5, dr = f ? 1.5 : 0;
+  /* руки + кисти на клавиатуре */
+  isoBox(uc - 9, v0 + 27, 3, 17, 4, 23, mix(shirt, -0.15));
+  isoBox(uc + 6, v0 + 27, 3, 17, 4, 23, mix(shirt, -0.15));
+  isoBox(uc - 9, v0 + 23 + dl, 3, 4, 3, 23, skin);
+  isoBox(uc + 6, v0 + 23 + dr, 3, 4, 3, 23, skin);
+  /* туловище */
+  isoBox(uc - 7, v0 + 42, 14, 8, 17, 11, shirt);
+  /* голова */
+  var u = uc - 4, v = v0 + 43, w = 8, d = 6, z0 = 28, h = 9;
+  isoBox(u, v, w, d, h, z0, skin);
+  polyFill(qV(u, u + w, z0 + 2, z0 + h, v + d), hair);
+  polyFill(qU(v, v + d, z0 + 4, z0 + h, u + w), hair);
+  polyFill([P(u, v, z0 + h), P(u + w, v, z0 + h), P(u + w, v + d, z0 + h), P(u, v + d, z0 + h)], mix(hair, 0.18));
+  lineP(P(u, v + d, z0 + h), P(u + w, v + d, z0 + h), '#14171c');
+  lineP(P(u + w, v, z0 + h), P(u + w, v + d, z0 + h), '#14171c');
+}
+
+var TAGS = [];
+var HITS = [];
+function hasName(p, i) { var s = p.names && p.names[i]; return !!s && s !== '—'; }
+function drawMail(p, cx, v0, t) {
+  var n = p.mail_n | 0;
+  if (n < 1) return;
+  var a = P(cx, v0 + 30, 24), k = 2, x = Math.round(a[0]) - 14, y = Math.round(a[1]) - 20 - Math.round(Math.sin(t * 3 + (strh(p.tag) % 7)) * 2);
+  function R(dx, dy, w, h, col) { rect(x + dx * k, y + dy * k, w * k, h * k, col); }
+  R(1, 7, 14, 2, 'rgba(0,0,0,0.30)');
+  R(0, 0, 14, 9, '#14171c');
+  R(1, 1, 12, 7, '#f4f1e6');
+  R(2, 2, 1, 1, '#c9402e'); R(3, 3, 2, 1, '#c9402e'); R(5, 4, 4, 1, '#c9402e');
+  R(9, 3, 2, 1, '#c9402e'); R(11, 2, 1, 1, '#c9402e');
+  if (n > 1) {
+    R(10, -5, 7, 7, '#14171c'); R(11, -4, 5, 5, '#e0412b');
+    g.font = 'bold 10px Verdana,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#fff'; g.fillText(n > 9 ? '9+' : String(n), x + 13.5 * k, y - 1.5 * k);
+  }
+}
+function drawUnit(p, cx, v0, t) {
+  var n = 2, dw = 72, u = cx - dw / 2;
+  var on = (p.status === 'green' || p.status === 'yellow');
+  var i, uc, seed, f, has;
+  shadowQuad(u + 4, v0 + 4, dw, 60, 0.2);
+  isoBox(u, v0, dw, 34, 22, 0, '#b98a4e', '#5b3f1e');
+  for (i = 0; i < 2; i++) lineP(P(u + 4, v0 + 10 + i * 10, 22), P(u + dw - 4 - ((hs(u, i) * 14) | 0), v0 + 10 + i * 10, 22), '#a97c43');
+  for (i = 0; i < n; i++) {
+    uc = u + 20 + i * 32;
+    seed = strh(hasName(p, i) ? p.names[i] : (p.tag + 'x' + i));
+    monitor(uc, v0, on, t, seed % 11);
+    keyboard(uc, v0, t, on, seed % 7);
+    mug(uc + 11, v0 + 23, (seed % 2) ? '#e8e8e8' : '#d8c9a0');
+  }
+  isoBox(u + dw - 7, v0 + 2, 4, 4, 1.5, 22, STATUS_LED[p.status] || STATUS_LED.gray, '#14171c');
+  for (i = 0; i < n; i++) {
+    uc = u + 20 + i * 32;
+    has = hasName(p, i);
+    seed = strh(has ? p.names[i] : (p.tag + 'x' + i));
+    f = Math.floor(t * 6 + seed) % 2;
+    chairPart(uc, v0, has);
+    if (has) person(uc, v0, seed, f);
+    chairBack(uc, v0, has);
+  }
+  drawMail(p, cx, v0, t);
+  var pts = [P(u, v0, 0), P(u + dw, v0, 0), P(u, v0 + 60, 0), P(u + dw, v0 + 60, 0),
+             P(u, v0, 42), P(u + dw, v0, 42), P(u, v0 + 60, 42), P(u + dw, v0 + 60, 42)], k, hb = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9, p: p };
+  for (k = 0; k < pts.length; k++) {
+    hb.x0 = Math.min(hb.x0, pts[k][0]); hb.x1 = Math.max(hb.x1, pts[k][0]);
+    hb.y0 = Math.min(hb.y0, pts[k][1]); hb.y1 = Math.max(hb.y1, pts[k][1]);
+  }
+  HITS.push(hb);
+  TAGS.push({ a: P(cx, v0 + 62, 0), p: p });
+}
+function drawTag(a, p) {
+  var nm = [], i;
+  for (i = 0; i < 2; i++) if (hasName(p, i)) nm.push(p.names[i]);
+  var l1 = fitLine('Партия ' + p.tag, true, [10], 128);
+  var l2 = fitLine(nm.length ? nm.join(' / ') : '—', false, [9, 8], 128);
+  var pw = Math.max(70, Math.min(132, Math.round(Math.max(l1.w, l2.w)) + 12)), ph = 26;
+  var x = Math.round(a[0] - pw / 2), y = a[1] + 6;
+  var bgc = STATUS_BG[p.status] || STATUS_BG.gray;
+  HITS.push({ x0: x, y0: y - 3, x1: x + pw, y1: y + ph, p: p });
+  rect(x + 2, y + 3, pw, ph, 'rgba(0,0,0,0.30)');
+  flatBox(x, y, pw, ph, bgc, mix(bgc, 0.3), mix(bgc, -0.3), '#0c0e12');
+  rect(a[0] - 3, y - 1, 7, 1, '#0c0e12'); rect(a[0] - 2, y - 2, 5, 1, bgc); rect(a[0] - 1, y - 3, 3, 1, '#0c0e12');
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = l1.font;
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l1.t, x + pw / 2 + 1, y + 9);
+  g.fillStyle = '#ffffff'; g.fillText(l1.t, x + pw / 2, y + 8);
+  g.font = l2.font;
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l2.t, x + pw / 2 + 1, y + 20);
+  g.fillStyle = '#eef0f2'; g.fillText(l2.t, x + pw / 2, y + 19);
+}
+/* ===== ПОДРОБНОСТИ ПО КЛИКУ: полный список партии ===== */
+var PP_STATUS = { green: 'рапорт + сводка 7:00', yellow: 'только суточный', gray: 'нет данных' };
+function ppEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function ppClose() { var b = document.getElementById('ppBox'); if (b) b.style.display = 'none'; }
+function ppOpen(p, mx, my) {
+  var b = document.getElementById('ppBox');
+  var list = (p.people && p.people.length) ? p.people : (p.names || []).filter(function (x) { return x && x !== '—'; }).map(function (x) { return { name: x, pos: '' }; });
+  var h = '<div class="ppT"><b>Партия ' + ppEsc(p.tag) + '</b>' + (p.room ? ' · ' + ppEsc(p.room) : '') + '<span class="ppX" id="ppX">×</span></div>';
+  h += '<div class="ppS"><i style="background:' + (STATUS_LED[p.status] || STATUS_LED.gray) + '"></i>' + (PP_STATUS[p.status] || PP_STATUS.gray) + '</div>';
+  if (list.length) {
+    h += '<ol>';
+    list.forEach(function (x) { h += '<li>' + ppEsc(x.name) + (x.pos ? ' <span>(' + ppEsc(x.pos) + ')</span>' : '') + '</li>'; });
+    h += '</ol>';
+  } else {
+    h += '<div class="ppN">Сейчас в партии никого нет</div>';
+  }
+  if (p.mail_n) {
+    h += '<div class="ppM"><b>✉ Непрочитанные письма (' + p.mail_n + ')</b>';
+    if (p.mails && p.mails.length) {
+      h += '<ul>';
+      p.mails.forEach(function (m) { h += '<li>' + ppEsc(m.subject) + (m.date ? ' <span>' + ppEsc(m.date) + '</span>' : '') + '</li>'; });
+      h += '</ul>';
+    }
+    h += '</div>';
+  }
+  b.innerHTML = h;
+  b.style.display = 'block';
+  var w = b.offsetWidth, hh = b.offsetHeight;
+  b.style.left = Math.max(6, Math.min(mx + 14, window.innerWidth - w - 8)) + 'px';
+  b.style.top = Math.max(6, Math.min(my + 10, window.innerHeight - hh - 8)) + 'px';
+  document.getElementById('ppX').onclick = ppClose;
+}
+function ppHit(e) {
+  var r = cv.getBoundingClientRect();
+  var x = (e.clientX - r.left) * cv.width / r.width, y = (e.clientY - r.top) * cv.height / r.height, k, h;
+  for (k = HITS.length - 1; k >= 0; k--) {
+    h = HITS[k];
+    if (x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1) return h.p;
+  }
+  return null;
+}
+function bindHits() {
+  var st = document.createElement('style');
+  st.textContent = '#ppBox{position:fixed;z-index:9000;display:none;min-width:260px;max-width:420px;background:#232a36;color:#dfe6f0;border:2px solid #000;box-shadow:inset 2px 2px 0 #3a4558,inset -2px -2px 0 #141922,4px 4px 0 rgba(0,0,0,.45);font:13px Verdana,"DejaVu Sans",sans-serif;padding:10px 14px}'
+    + '#ppBox .ppT{font-size:14px;margin-bottom:6px;padding-right:22px;color:#fff}#ppBox .ppX{position:absolute;right:10px;top:6px;cursor:pointer;font-size:18px;line-height:18px;color:#9fb0c8}'
+    + '#ppBox .ppS{font-size:11px;color:#9fb0c8;margin-bottom:8px;display:flex;align-items:center;gap:6px}#ppBox .ppS i{display:inline-block;width:10px;height:10px;border:1px solid #000}'
+    + '#ppBox .ppM{margin-top:10px;padding-top:8px;border-top:1px solid #3a4558;font-size:12px}#ppBox .ppM ul{margin:4px 0 0;padding-left:18px}#ppBox .ppM li{margin:2px 0;word-break:break-word}#ppBox .ppM li span{color:#9fb0c8}'
+    + '#ppBox ol{margin:0;padding-left:22px}#ppBox li{margin:3px 0}#ppBox li span{color:#9fb0c8}#ppBox .ppN{color:#9fb0c8}';
+  document.head.appendChild(st);
+  var box = document.createElement('div');
+  box.id = 'ppBox';
+  document.body.appendChild(box);
+  cv.addEventListener('click', function (e) {
+    var p = ppHit(e);
+    if (p) { ppOpen(p, e.clientX, e.clientY); e.stopPropagation(); } else ppClose();
+  });
+  cv.addEventListener('mousemove', function (e) { cv.style.cursor = ppHit(e) ? 'pointer' : 'default'; });
+  document.addEventListener('click', function (e) { if (!box.contains(e.target) && e.target !== cv) ppClose(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') ppClose(); });
+}
+function drawZoneSign(title, a) {
+  var f = fitLine(title, true, [12, 11], 300);
+  var w = Math.round(f.w) + 28, h = 20;
+  var x = Math.round(a[0] - w / 2), y = Math.round(a[1] - h / 2);
+  rect(x + 2, y + 3, w, h, 'rgba(0,0,0,0.35)');
+  flatBox(x, y, w, h, '#2a4f8a', '#3a63a8', '#1f3c6b', '#10203a');
+  g.font = f.font; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(f.t, a[0] + 1, a[1] + 2);
+  g.fillStyle = '#ffffff'; g.fillText(f.t, a[0], a[1] + 1);
+}
+
+/* ================== КАДР ================== */
+function findRoom(key) {
+  for (var i = 0; i < DATA.rooms.length; i++) if (DATA.rooms[i].key === key) return DATA.rooms[i];
+  return null;
+}
+function draw(t) {
+  g.clearRect(0, 0, W, H);
+  g.drawImage(bg, 0, 0);
+  TAGS.length = 0; HITS.length = 0;
+  racks(t);
+  var items = [], zi, k, room, list, c, r, base;
+  for (zi = 0; zi < ZONES.length; zi++) {
+    room = findRoom(ZONES[zi]);
+    if (!room) continue;
+    list = [];
+    for (k = 0; k < room.parties.length; k++) {
+      if (ONLY && room.parties[k].status === 'gray') continue;
+      list.push(room.parties[k]);
+    }
+    for (k = 0; k < list.length; k++) {
+      list[k].room = room.title;
+      c = k % COLS; r = Math.floor(k / COLS);
+      items.push({ p: list[k], cx: U0 + ZPOS[zi][0] * ZSTEP + PU * (c + 0.5), v0: V0 + ZPOS[zi][1] * (3 * PV + GAP) + r * PV });
+    }
+  }
+  for (k = 0; k < TREES.length; k++) items.push({ tree: true, cx: TREES[k][0], v0: TREES[k][1], seed: k });
+  items.sort(function (a, b) { return (a.v0 - b.v0) || (a.cx - b.cx); });
+  for (k = 0; k < items.length; k++) {
+    if (items[k].tree) tree(items[k].cx, items[k].v0, t, items[k].seed);
+    else drawUnit(items[k].p, items[k].cx, items[k].v0, t);
+  }
+  for (zi = 0; zi < ZONES.length; zi++) {
+    room = findRoom(ZONES[zi]);
+    drawZoneSign(room ? room.title : ZONES[zi], ZPOS[zi][1] === 0 ? P(U0 + ZPOS[zi][0] * ZSTEP + 210, 0, WALL - 6) : P(0, V0 + 3 * PV + GAP + PV - 30, 70));
+  }
+  for (k = 0; k < TAGS.length; k++) drawTag(TAGS[k].a, TAGS[k].p);
+}
+function loop(ts) {
+  draw(ts / 1000);
+  requestAnimationFrame(loop);
+}
+function init() {
+  cv = document.getElementById('c');
+  g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  bindHits();
+  buildStatic();
+  var cb = document.getElementById('only');
+  cb.onchange = function () { ONLY = cb.checked; };
+  requestAnimationFrame(loop);
+}
+init();
+
+function loadDate(filename) {
+  // Перезагрузка страницы с другим отчётом
+  window.location.search = '?date=' + filename;
+}
+</script>
+<div id="linkBar" style="position:fixed;left:0;right:0;bottom:0;z-index:9999;font:12px monospace;padding:4px 10px;text-align:center;color:#8fa0b8;background:#1b222d"></div>
+<div id="pwBox" style="display:none;position:fixed;inset:0;z-index:10000;background:#0d1117;color:#cfd6e2;font:15px monospace;align-items:center;justify-content:center">
+ <form id="pwForm" style="background:#1b222d;padding:26px 30px;border:2px solid #3a4658;min-width:280px;text-align:center">
+  <div style="font-size:18px;margin-bottom:14px">MONITORING</div>
+  <input id="pwIn" type="password" placeholder="Пароль" autocomplete="current-password" style="width:100%;padding:8px;font:inherit;box-sizing:border-box"><br>
+  <label style="display:block;margin:10px 0;font-size:12px;color:#8fa0b8"><input id="pwKeep" type="checkbox"> запомнить на этом компьютере</label>
+  <button type="submit" style="padding:8px 22px;font:inherit;cursor:pointer">Войти</button>
+  <div id="pwErr" style="color:#ff6b6b;margin-top:10px;min-height:18px;font-size:13px"></div>
+ </form>
+</div>
+<script>
+(function () {
+  var sel = document.getElementById('dateSelect');
+  function fill() {
+    if (!sel || !__SNAP || !__SNAP.order) return;
+    var cur = __sel(), h = '';
+    __SNAP.order.forEach(function (d) {
+      var p = d.split('.');
+      h += '<option value="' + d + '"' + (d === cur ? ' selected' : '') + '>' + p[0] + '.' + p[1] + '.20' + p[2] + '</option>';
+    });
+    sel.innerHTML = h;
+  }
+  function bar() {
+    var b = document.getElementById('linkBar'), t = __SNAP ? (__SNAP.pult_ts ? __SNAP.pult_ts * 1000 : __parseTime(__SNAP.pult_time)) : 0;
+    if (!__SNAP || !t || Date.now() - t > __STALE) {
+      b.style.background = '#b00020'; b.style.color = '#fff';
+      b.textContent = 'Нет связи с пультом' + (__SNAP && __SNAP.pult_time ? ' — данные от ' + __SNAP.pult_time : '') + ' (карта может быть неактуальна)';
+    } else {
+      b.style.background = '#1b222d'; b.style.color = '#8fa0b8';
+      b.textContent = 'Данные от ' + __SNAP.pult_time;
+    }
+  }
+  function apply(s) {
+    __SNAP = s;
+    var d = __sel();
+    if (s.days && s.days[d]) DATA.rooms = s.days[d].rooms;
+    fill(); bar();
+  }
+  function refresh() {
+    __fetchAsync().then(function (o) {
+      if (o && o.ct) {
+        var pw = __get('gti_pw');
+        if (!pw) { document.getElementById('pwBox').style.display = 'flex'; return; }
+        return __decrypt(o, pw).then(function (txt) {
+          __store('gti_snap', txt); apply(JSON.parse(txt));
+        }, function () {
+          __store('gti_pw', null); __store('gti_snap', null); location.reload();
+        });
+      }
+      apply(o);
+    }).catch(function () { bar(); });
+  }
+  document.getElementById('pwForm').onsubmit = function (e) {
+    e.preventDefault();
+    var pw = document.getElementById('pwIn').value, err = document.getElementById('pwErr');
+    err.textContent = '';
+    __fetchAsync().then(function (o) { return __decrypt(o, pw).then(function (txt) {
+      if (document.getElementById('pwKeep').checked) { try { localStorage.setItem('gti_pw', pw); } catch (e2) {} }
+      __store('gti_pw', pw); __store('gti_snap', txt); location.reload();
+    }); }).catch(function () { err.textContent = 'Неверный пароль или нет связи'; });
+  };
+  fill(); bar();
+  if (__ENC && !__SNAP) document.getElementById('pwBox').style.display = 'flex';
+  setTimeout(refresh, 1500);
+  setInterval(refresh, 60000);
+})();
+</script></body>
+</html>
