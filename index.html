@@ -761,6 +761,11 @@ function person(uc, v0, seed, f, clap) {
     isoBox(uc + 6, v0 + 34, 3, 10, 4, 23, sh);
     isoBox(uc - 8 + gp, v0 + 30, 3, 5, 3, 27, skin);
     isoBox(uc + 5 - gp, v0 + 30, 3, 5, 3, 27, skin);
+  } else if (clap === 3) {     /* партия не в работе: сидят, руки на коленях, ничего не делают */
+    isoBox(uc - 9, v0 + 38, 3, 6, 4, 17, sh);
+    isoBox(uc + 6, v0 + 38, 3, 6, 4, 17, sh);
+    isoBox(uc - 9, v0 + 36, 3, 4, 3, 16, skin);
+    isoBox(uc + 6, v0 + 36, 3, 4, 3, 16, skin);
   } else if (clap) {           /* двое: играют «в ладушки» через стол */
     L = f ? 10 : 4; hz = f ? 35 : 29;
     isoBox(clap > 0 ? uc - 9 : uc + 6, v0 + 34, 3, 10, 4, 23, sh);
@@ -824,7 +829,7 @@ function drawUnit(p, cx, v0, t) {
     seed = strh(has ? p.names[i] : (p.tag + 'x' + i));
     f = Math.floor(t * 6 + seed) % 2;
     chairPart(uc, v0, has);
-    if (has) { cl = !on ? (hasName(p, 1 - i) ? (i === 0 ? 1 : -1) : 2) : 0; person(uc, v0, seed, cl ? Math.floor(t * 4) % 2 : f, cl); }
+    if (has) { cl = !on ? 3 : 0; person(uc, v0, seed, f, cl); }
     chairBack(uc, v0, has);
   }
   drawMail(p, cx, v0, t);
