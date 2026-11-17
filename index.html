@@ -630,8 +630,6 @@ function drawTicker(t) {
   if (n) {
     g.font = 'bold 17px monospace'; g.fillStyle = '#ff6b4a'; g.fillText('Внимание!', hp[0], -9);
     g.font = 'bold 15px monospace'; g.fillStyle = '#eaf2ff'; g.fillText('Задачи: ' + n, hp[0], 10);
-  } else {
-    g.font = 'bold 15px monospace'; g.fillStyle = '#7f8a9a'; g.fillText('Задач нет', hp[0], 0);
   }
   g.restore();
   if (!text) return;
@@ -662,7 +660,7 @@ function drawTicker(t) {
 }
 function boardState() {
   var r = DATA.rem;
-  return r ? { total: r.total || 0, items: r.items || [] } : null;
+  return (r && r.items && r.items.length) ? { total: r.total || 0, items: r.items } : null;   /* нет задач — пустое табло */
 }
 function buildStatic() {
   bg = document.createElement('canvas');
