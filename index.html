@@ -842,7 +842,6 @@ function drawUnit(p, cx, v0, t) {
   HITS.push(hb);
   TAGS.push({ a: P(cx, v0 + 62, 0), p: p });
 }
-/* где стоит партия: колонка D вкладки «Партии» — Месторождение_Куст_Скважина */
 function objFmt(s) {
   var parts = String(s || '').split('_').map(function (x) { return x.trim(); }).filter(Boolean);
   if (parts.length >= 3) return { full: parts[0] + ', куст ' + parts[1] + ', скв. ' + parts.slice(2).join('_'), short: parts[0] + ' · к.' + parts[1] + ' · с.' + parts.slice(2).join('_') };
@@ -852,10 +851,10 @@ function objFmt(s) {
 function drawTag(a, p) {
   var nm = [], i;
   for (i = 0; i < 2; i++) if (hasName(p, i)) nm.push(p.names[i]);
-  var l1 = fitLine('Партия ' + p.tag, true, [10], 128);
-  var l2 = fitLine(nm.length ? nm.join(' / ') : '—', false, [9, 8], 128);
-  var l3 = p.obj ? fitLine(objFmt(p.obj).short, false, [8, 7], 128) : null;
-  var pw = Math.max(70, Math.min(132, Math.round(Math.max(l1.w, l2.w, l3 ? l3.w : 0)) + 12)), ph = l3 ? 36 : 26;
+  var l1 = fitLine('Партия ' + p.tag, true, [12, 11], 124);
+  var l2 = fitLine(nm.length ? nm.join(' / ') : '—', false, [12, 11, 10], 124);
+  var l3 = p.obj ? fitLine(objFmt(p.obj).short, false, [11, 10, 9], 124) : null;
+  var pw = Math.max(70, Math.min(134, Math.round(Math.max(l1.w, l2.w, l3 ? l3.w : 0)) + 12)), ph = l3 ? 44 : 31;
   var x = Math.round(a[0] - pw / 2), y = a[1] + 6;
   var bgc = STATUS_BG[p.status] || STATUS_BG.gray;
   HITS.push({ x0: x, y0: y - 3, x1: x + pw, y1: y + ph, p: p });
@@ -864,15 +863,12 @@ function drawTag(a, p) {
   rect(a[0] - 3, y - 1, 7, 1, '#0c0e12'); rect(a[0] - 2, y - 2, 5, 1, bgc); rect(a[0] - 1, y - 3, 3, 1, '#0c0e12');
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.font = l1.font;
-  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l1.t, x + pw / 2 + 1, y + 9);
-  g.fillStyle = '#ffffff'; g.fillText(l1.t, x + pw / 2, y + 8);
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l1.t, x + pw / 2 + 1, y + 10);
+  g.fillStyle = '#ffffff'; g.fillText(l1.t, x + pw / 2, y + 9);
   g.font = l2.font;
-  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l2.t, x + pw / 2 + 1, y + 20);
-  g.fillStyle = '#eef0f2'; g.fillText(l2.t, x + pw / 2, y + 19);
-  if (l3) {
-    g.font = l3.font; g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l3.t, x + pw / 2 + 1, y + 30);
-    g.fillStyle = '#ffe9a8'; g.fillText(l3.t, x + pw / 2, y + 29);
-  }
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l2.t, x + pw / 2 + 1, y + 24);
+  g.fillStyle = '#eef0f2'; g.fillText(l2.t, x + pw / 2, y + 23);
+  if (l3) { g.font = l3.font; g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l3.t, x + pw / 2 + 1, y + 37); g.fillStyle = '#c9e4ff'; g.fillText(l3.t, x + pw / 2, y + 36); }
 }
 /* ===== ПОДРОБНОСТИ ПО КЛИКУ: полный список партии ===== */
 var PP_STATUS = { green: 'рапорт получен', yellow: 'рапорт получен', gray: 'нет данных с партии' };
@@ -884,9 +880,10 @@ function ppOpen(p, mx, my) {
   var h = '<div class="ppT"><b>Партия ' + ppEsc(p.tag) + '</b>' + (p.room ? ' · ' + ppEsc(p.room) : '') + '<span class="ppX" id="ppX">×</span></div>';
   h += '<div class="ppS"><i style="background:' + (STATUS_LED[p.status] || STATUS_LED.gray) + '"></i>' + (PP_STATUS[p.status] || PP_STATUS.gray) + '</div>';
   if (p.obj) h += '<div class="ppM" style="margin:2px 0 6px"><b>📍 Где стоит:</b> ' + ppEsc(objFmt(p.obj).full) + '</div>';
+  if (p.phone) h += '<div class="ppM" style="margin:2px 0 6px;color:#8fe08f">☎ ' + ppEsc(p.phone) + '</div>';
   if (list.length) {
     h += '<ol>';
-    list.forEach(function (x) { h += '<li>' + ppEsc(x.name) + (x.pos ? ' <span>(' + ppEsc(x.pos) + ')</span>' : '') + (x.phone ? '<br><span style="color:#8fe08f">☎ ' + ppEsc(x.phone) + '</span>' : '') + '</li>'; });
+    list.forEach(function (x) { h += '<li>' + ppEsc(x.name) + (x.pos ? ' <span>(' + ppEsc(x.pos) + ')</span>' : '') + '' + '</li>'; });
     h += '</ol>';
   } else {
     h += '<div class="ppN">Сейчас в партии никого нет</div>';
