@@ -81,7 +81,7 @@ function loadDate(filename) {
   .legend { flex: 1; gap: 14px; flex-wrap: wrap; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   .sq { display: inline-block; width: 11px; height: 11px; border: 1px solid #000; }
-  canvas { display: block; margin: 0 auto; width: 100%; max-width: 1340px; height: auto; image-rendering: pixelated; image-rendering: crisp-edges; }
+  canvas { display: block; margin: 0 auto; width: 100%; max-width: 1340px; height: auto; image-rendering: auto; }
   html, body { overflow-x: hidden; }
   body { padding-bottom: 30px; }
   #hud { width: auto; max-width: 1340px; padding: 8px 6px; }
@@ -139,7 +139,7 @@ var Z = 0.9, K = 0.86;        /* масштаб и сжатие глубины *
 var U = 1376, V = 576, GAP = 40;        /* размеры пола в «единицах мира» */
 var WALL = 160;               /* высота задних стен */
 var OX = 40, OY = 167;         /* смещение на экране */
-var cv, g, bg, bgCtx, ONLY = false;
+var cv, g, bg, bgCtx, ONLY = false, SS = 2;   /* SS: во сколько раз чётче рисуем (текст и картинка) */
 var ROWS = 3;                 /* рядов столов в самой большой зоне (пол растёт, если партий больше 9) */
 function rowsNeeded() {
   var m = 3, i, k, n;
@@ -605,7 +605,7 @@ function boardRect() {
 }
 function onBoard(e) {
   var r = cv.getBoundingClientRect(), b = boardRect();
-  var x = (e.clientX - r.left) * cv.width / r.width, y = (e.clientY - r.top) * cv.height / r.height;
+  var x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
   return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
 }
 /* текст лежит в плоскости табло: наклон стены (вертикали уходят влево-вверх) + наклон табло к людям */
@@ -654,8 +654,9 @@ function boardState() {
 }
 function buildStatic() {
   bg = document.createElement('canvas');
-  bg.width = W; bg.height = H;
+  bg.width = W * SS; bg.height = H * SS;
   bgCtx = bg.getContext('2d');
+  bgCtx.setTransform(SS, 0, 0, SS, 0, 0); bgCtx.imageSmoothingEnabled = false;
   var main = g; g = bgCtx;
   var i, j;
   rect(0, 0, W, H, '#0e1116');
@@ -851,10 +852,9 @@ function objFmt(s) {
 function drawTag(a, p) {
   var nm = [], i;
   for (i = 0; i < 2; i++) if (hasName(p, i)) nm.push(p.names[i]);
-  var l1 = fitLine('Партия ' + p.tag, true, [12, 11], 124);
-  var l2 = fitLine(nm.length ? nm.join(' / ') : '—', false, [12, 11, 10], 124);
-  var l3 = p.obj ? fitLine(objFmt(p.obj).short, false, [11, 10, 9], 124) : null;
-  var pw = Math.max(70, Math.min(134, Math.round(Math.max(l1.w, l2.w, l3 ? l3.w : 0)) + 12)), ph = l3 ? 44 : 31;
+  var l1 = fitLine('Партия ' + p.tag, true, [10], 128);
+  var l2 = fitLine(nm.length ? nm.join(' / ') : '—', false, [9, 8], 128);
+  var pw = Math.max(70, Math.min(132, Math.round(Math.max(l1.w, l2.w)) + 12)), ph = 26;
   var x = Math.round(a[0] - pw / 2), y = a[1] + 6;
   var bgc = STATUS_BG[p.status] || STATUS_BG.gray;
   HITS.push({ x0: x, y0: y - 3, x1: x + pw, y1: y + ph, p: p });
@@ -863,12 +863,11 @@ function drawTag(a, p) {
   rect(a[0] - 3, y - 1, 7, 1, '#0c0e12'); rect(a[0] - 2, y - 2, 5, 1, bgc); rect(a[0] - 1, y - 3, 3, 1, '#0c0e12');
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.font = l1.font;
-  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l1.t, x + pw / 2 + 1, y + 10);
-  g.fillStyle = '#ffffff'; g.fillText(l1.t, x + pw / 2, y + 9);
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l1.t, x + pw / 2 + 1, y + 9);
+  g.fillStyle = '#ffffff'; g.fillText(l1.t, x + pw / 2, y + 8);
   g.font = l2.font;
-  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l2.t, x + pw / 2 + 1, y + 24);
-  g.fillStyle = '#eef0f2'; g.fillText(l2.t, x + pw / 2, y + 23);
-  if (l3) { g.font = l3.font; g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l3.t, x + pw / 2 + 1, y + 37); g.fillStyle = '#c9e4ff'; g.fillText(l3.t, x + pw / 2, y + 36); }
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillText(l2.t, x + pw / 2 + 1, y + 20);
+  g.fillStyle = '#eef0f2'; g.fillText(l2.t, x + pw / 2, y + 19);
 }
 /* ===== ПОДРОБНОСТИ ПО КЛИКУ: полный список партии ===== */
 var PP_STATUS = { green: 'рапорт получен', yellow: 'рапорт получен', gray: 'нет данных с партии' };
@@ -906,7 +905,7 @@ function ppOpen(p, mx, my) {
 }
 function ppHit(e) {
   var r = cv.getBoundingClientRect();
-  var x = (e.clientX - r.left) * cv.width / r.width, y = (e.clientY - r.top) * cv.height / r.height, k, h;
+  var x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height, k, h;
   for (k = HITS.length - 1; k >= 0; k--) {
     h = HITS[k];
     if (x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1) return h.p;
@@ -950,7 +949,7 @@ function findRoom(key) {
 }
 function draw(t) {
   g.clearRect(0, 0, W, H);
-  g.drawImage(bg, 0, 0);
+  g.drawImage(bg, 0, 0, W, H);
   TAGS.length = 0; HITS.length = 0;
   racks(t);
   var items = [], zi, k, room, list, c, r, base;
@@ -997,8 +996,9 @@ function init() {
   ROWS = rowsNeeded();
   V = 576 + (ROWS - 3) * PV;
   H = Math.round(703 + (ROWS - 3) * PV * Z * K);
-  cv.height = H;
+  cv.width = W * SS; cv.height = H * SS;
   g = cv.getContext('2d');
+  g.setTransform(SS, 0, 0, SS, 0, 0);
   g.imageSmoothingEnabled = false;
   bindHits();
   buildStatic();
