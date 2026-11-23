@@ -81,6 +81,24 @@ function loadDate(filename) {
   .legend { flex: 1; gap: 14px; flex-wrap: wrap; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   .sq { display: inline-block; width: 11px; height: 11px; border: 1px solid #000; }
+#tbl{display:none;box-sizing:border-box;width:100%;max-width:1340px;margin:0 auto;padding:10px 12px 30px;color:#dfe6f0;font:11px Verdana,"DejaVu Sans",sans-serif}
+#tbl .tz{margin:0 0 12px}
+#tbl .tzh{font:bold 13px monospace;color:#fff;background:#1d3557;border:2px solid #000;padding:3px 10px;display:inline-block;margin-bottom:6px}
+#tbl .tg{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,204px));gap:6px}
+#tbl .tc{background:#232a36;border:2px solid #000;box-shadow:inset 1px 1px 0 #3a4558,inset -1px -1px 0 #141922;cursor:pointer;min-height:44px}
+#tbl .tc:hover{outline:1px solid #6fa8ff}
+#tbl .tc.tcz{opacity:.6}
+#tbl .tch{background:#2f5d8c;color:#fff;padding:2px 6px;font:bold 11px monospace;display:flex;align-items:center;gap:6px}
+#tbl .tch .tcd{width:8px;height:8px;border:1px solid #000;display:inline-block}
+#tbl .tch .tcw{margin-left:auto;font-weight:normal;color:#cfe6ff}
+#tbl .tcb{padding:3px 6px 4px;line-height:1.28}
+#tbl .tcl{color:#b9c6da}
+#tbl .tcg{color:#8fe08f}
+#tbl .tcp{margin:2px 0 0;padding:0;list-style:none}
+#tbl .tcp li{margin:0}
+#tbl .tcp span{color:#8d9bb2}
+#tbl .tcx{color:#e0c070}
+#tbl .tcn{color:#7f8da3;font-style:italic}
   canvas { display: block; margin: 0 auto; width: 100%; max-width: 1340px; height: auto; image-rendering: auto; }
   html, body { overflow-x: hidden; }
   body { padding-bottom: 30px; }
@@ -91,6 +109,7 @@ function loadDate(filename) {
 <body>
 <div id="hud"><div class="box title">Информационный Мониторинг Строительства Скважин</div><div class="box">В работе: <b id="workN">…</b></div><input type="checkbox" id="only" hidden></div>
 <canvas id="c" width="1340" height="640"></canvas>
+<div id="tbl"></div>
 
 <script>
 /* ================== ДАННЫЕ (заглушка; позже заменяется реальным JSON) ================== */
@@ -979,10 +998,54 @@ function draw(t) {
   }
   for (k = 0; k < TAGS.length; k++) drawTag(TAGS[k].a, TAGS[k].p);
 }
+var VIEW = 'office';
+try { VIEW = localStorage.getItem('mon_view') === 'table' ? 'table' : 'office'; } catch (e) {}
+function setView(v) {
+  VIEW = v;
+  try { localStorage.setItem('mon_view', v); } catch (e) {}
+  document.getElementById('c').style.display = v === 'table' ? 'none' : 'block';
+  document.getElementById('tbl').style.display = v === 'table' ? 'block' : 'none';
+  var s = document.getElementById('viewSel'); if (s) s.value = v;
+  if (v === 'table') renderTable();
+}
+function renderTable() {
+  if (typeof VIEW === 'undefined' || VIEW !== 'table') return;
+  var box = document.getElementById('tbl'), h = '', i, k, j, rm, p, ppl, shown, nm;
+  for (i = 0; i < DATA.rooms.length; i++) {
+    rm = DATA.rooms[i]; shown = '';
+    for (k = 0; k < rm.parties.length; k++) {
+      p = rm.parties[k];
+      if (ONLY && p.status === 'gray') continue;
+      ppl = (p.people && p.people.length) ? p.people : (p.names || []).filter(function (x) { return x && x !== '—'; }).map(function (x) { return { name: x, pos: '' }; });
+      shown += '<div class="tc' + (p.status === 'gray' ? ' tcz' : '') + '" data-i="' + i + '" data-k="' + k + '"><div class="tch"><span>Партия ' + ppEsc(p.tag) + '</span>' +
+        '<i class="tcd" style="background:' + (STATUS_LED[p.status] || STATUS_LED.gray) + '" title="' + ppEsc(PP_STATUS[p.status] || PP_STATUS.gray) + '"></i>' +
+        '<span class="tcw">' + (ppl.length ? '👥' + ppl.length : '') + '</span></div><div class="tcb">' +
+        (p.obj ? '<div class="tcl">📍 ' + ppEsc(objFmt(p.obj).full) + '</div>' : '') +
+        (p.phone ? '<div class="tcg">☎ ' + ppEsc(p.phone) + '</div>' : '');
+      if (ppl.length) {
+        shown += '<ul class="tcp">';
+        for (j = 0; j < ppl.length; j++) shown += '<li>' + ppEsc(ppl[j].name) + (ppl[j].pos ? ' <span>(' + ppEsc(ppl[j].pos) + ')</span>' : '') + '</li>';
+        shown += '</ul>';
+      } else shown += '<div class="tcn">никого</div>';
+      if (p.mail_n) shown += '<div class="tcx">✉ писем: ' + p.mail_n + '</div>';
+      shown += '</div></div>';
+    }
+    if (shown) h += '<div class="tz"><div class="tzh">' + ppEsc(rm.title) + '</div><div class="tg">' + shown + '</div></div>';
+  }
+  box.innerHTML = h || '<div class="tcn">Нет данных.</div>';
+  box.querySelectorAll('.tc').forEach(function (el) {
+    el.onclick = function (e) {
+      ppOpen(DATA.rooms[+el.getAttribute('data-i')].parties[+el.getAttribute('data-k')], e.clientX, e.clientY);
+    };
+  });
+}
 function updateWork() {
   var n = 0, m = 0, i, k, el = document.getElementById('workN');
   for (i = 0; i < DATA.rooms.length; i++) for (k = 0; k < DATA.rooms[i].parties.length; k++) { m++; if (DATA.rooms[i].parties[k].status !== 'gray') n++; }
   if (el) el.textContent = WORKMODE === 'n' ? String(n) : n + ' из ' + m;
+  var ce = document.getElementById('crewN'), pc = 0;
+  for (i = 0; i < DATA.rooms.length; i++) for (k = 0; k < DATA.rooms[i].parties.length; k++) pc += (DATA.rooms[i].parties[k].people || []).length;
+  if (ce) ce.textContent = pc + ' чел.';
 }
 var WORKMODE = 'n';
 function loop(ts) {
@@ -1003,7 +1066,10 @@ function init() {
   bindHits();
   buildStatic();
   var cb = document.getElementById('only');
-  cb.onchange = function () { ONLY = cb.checked; };
+  cb.onchange = function () { ONLY = cb.checked; renderTable(); };
+  var vs = document.getElementById('viewSel');
+  if (vs) vs.onchange = function () { setView(vs.value); };
+  setView(VIEW);
   requestAnimationFrame(loop);
 }
 init();
